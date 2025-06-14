@@ -1,3 +1,4 @@
+﻿//按'A' or 'a'動畫開始
 #include "objReader.h"
 #include <iostream>
 #include <math.h>
@@ -9,16 +10,21 @@
 
 using namespace std;
 
-void DrawObject(ObjModel* model);
+void DrawObject(ObjModel* model, int);
 float GetRandomRange(float min, float max);
 
 const float cameraMoveSpeed = 12.5f, cameraRotateSpeed = 3.5f;
 const int TEXTURE_NUMBER = 5;
-const int SKY_TEXTURE_NUMBER = 1;
+//const int SKY_TEXTURE_NUMBER = 1;
 const int SKY_TEX0 = 0;
-const int CAMOUFLAGE_TEX_INDEX = 0, METAL_TEX_INDEX = 1, EARTH_TEX_INDEX = 2;
-const int SHIPB_NUMBER = 1;
-const int EARTH_NUMBER = 1;
+const int bluedotTextureIndex = 0, reddotTextureIndex = 1, greendotTextureIndex = 2, UFOTextureIndex = 3;
+const int DOT_NUMBER = 3;
+const int UFO_NUMBER = 1;
+bool isPlaying = false;
+float dotScale = 0.01f; // 開始小
+float dotAlpha = 0.0f;  // 開始透明
+float blendFactor = 0.0f; // skybox blending
+GLuint skyTextures[2]; // [0] = dark_forest, [1] = bright_forest
 
 int windowWidth = 800, windowHeight = 600;
 GLfloat  ambientLight[] = { 0.4f, 0.4f, 0.41f, 1.0f };
@@ -34,69 +40,80 @@ GLfloat low_sh[] = { 0.35f };
 bool textureTriangle = false, textureModle = false;
 float textureCoord[3][2];
 GLuint textures[TEXTURE_NUMBER];
-GLuint skyTextures[SKY_TEXTURE_NUMBER];
+//GLuint skyTextures[SKY_TEXTURE_NUMBER];
 
 float cameraPos[] = { -90, -10, -50 }, cameraRotate[] = { 5, 130, 0 }, cameraDistance = 240;
 float groundHeight = 3.0f, groundSize = 3000;
 
-ObjModel shipBodyB, specialA, specialB, earth;
-
-
-struct ShipB
+ObjModel dotBlue, dotRed, dotGreen, ufo;
+struct UFO
 {
 	float position[3] = { 0, 0, 0 }, rotateDegree = 0;
-	float specialARotate = 0, specialBRotate = 0;
+	float t = 0;
+	float A = 200, B = 100, height = 80;
 	void DrawSelf() {
 		glPushMatrix();
-
 		glTranslatef(position[0], groundHeight + position[1], position[2]);
 		glRotatef(rotateDegree, 0, 1, 0);
+		glScalef(5.0f, 5.0f, 5.0f);
 		glColor3f(1.0f, 1.0f, 1.0f);
-		DrawObject(&shipBodyB);
-		{
-			glPushMatrix();
-			glTranslatef(0, 25.0f, 0);
-			{
-				glPushMatrix();
-				glRotatef(specialBRotate, 0, 1, 0);
-				glTranslatef(0, cos(specialBRotate / 40.0f) * 7.0f, 0);
-				DrawObject(&specialB);
-				glPopMatrix();
-			}
-			glRotatef(specialARotate, 0, 1, 0);
-			DrawObject(&specialA);
-			glPopMatrix();
-		}
+		DrawObject(&ufo, UFOTextureIndex);
 		glPopMatrix();
-	}//------------------------------------------------------------------------------
+	}
 	void Update() {
-		specialARotate += 1.25f;
-		specialBRotate -= 5.33f;
+		t += 0.09f;
+		position[0] = A * sin(t);
+		position[2] = B * sin(t) * cos(t);
+		position[1] = height + sin(t * 2.0f) * 5.0f; // 增加上下浮動
+		rotateDegree += 2.5f;
 	}
 };
-struct Earth
+
+struct Dot
 {
-	float position[3] = { 10, 0, 0 }, rotateDegree = 0;
-	void DrawSelf() {
-		glPushMatrix();
-		glScalef(2.5f, 2.5f, 2.5f);
-		glTranslatef(position[0], groundHeight + position[1], position[2]);
-		glRotatef(rotateDegree, 0, 1, 0);
-		glColor3f(1.0f, 1.0f, 1.0f);
-		DrawObject(&earth);
+	float position[3] = { 0, 0, 0 }, rotateDegree = 0;
+	float t = 0;
+	float A = 200, B = 100, height = 80;
+	int textureIndex = 0;
+	ObjModel* model = nullptr; 
 
+	void DrawDot() {
+		glPushMatrix();
+		glDisable(GL_LIGHTING);
+		glTranslatef(position[0], groundHeight + position[1], position[2]);
+		glScalef(dotScale, dotScale, dotScale);
+
+		glEnable(GL_TEXTURE_2D);
+		glBindTexture(GL_TEXTURE_2D, textures[textureIndex]);
+		glEnable(GL_BLEND);
+		glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+		glColor4f(1.0f, 1.0f, 1.0f, dotAlpha);
+
+		if (model != nullptr)
+			DrawObject(model,textureIndex);
+
+		glDisable(GL_BLEND);
+		glDisable(GL_TEXTURE_2D);
+		glEnable(GL_LIGHTING);
 		glPopMatrix();
-	}//------------------------------------------------------------------------------
+	}
 	void Update() {
-		rotateDegree += 1.25f;
+		const int fadeInFrames = 300;
+		if (t < fadeInFrames) {
+			t += 1;
+			dotAlpha = t / (float)fadeInFrames;
+			dotScale = 0.01f + t * (0.6f / fadeInFrames);
+		}
+		else {
+			dotAlpha = 1.0f;
+			dotScale = 0.61f;
+		}
 	}
 };
-//=========================================================================
 
-ShipB shipBArray[SHIPB_NUMBER];
-Earth earthArray[EARTH_NUMBER];
+Dot dotArray[DOT_NUMBER];
+UFO ufoArray[UFO_NUMBER];
 
-//==========================================================================
 void NormalizeTriangle(vector<float>* v) {
 	float len = sqrt(v->at(0) * v->at(0) + v->at(1) * v->at(1) + v->at(2) * v->at(2));
 	for (int i = 0; i <= 2; i++) {
@@ -146,29 +163,25 @@ void ActiveTextureToNextTriangle(int index, float coord[3][2]) {
 		}
 	}
 }
-//----------------------------------------------------------------------------
-void DrawObject(ObjModel* model) {
+
+void DrawObject(ObjModel* model, int textureIndex) {
 	for (int i = 0; i < model->face.size(); i++) {
-		if (model->textureIndex >= 0) {
+		if (!model->faceTex.empty()) {
 			vector<float> coord1 = model->texture[model->faceTex[i][0]],
 				coord2 = model->texture[model->faceTex[i][1]],
 				coord3 = model->texture[model->faceTex[i][2]];
 			float texCoord[3][2] = {
 				{coord1[0], coord1[1]}, {coord2[0], coord2[1]}, {coord3[0], coord3[1]}
 			};
-			ActiveTextureToNextTriangle(model->textureIndex, texCoord);
+			ActiveTextureToNextTriangle(textureIndex, texCoord); // 用正確 index
 		}
-		vector<float> p1 = model->vertex[model->face[i][0]],
-			p2 = model->vertex[model->face[i][1]],
-			p3 = model->vertex[model->face[i][2]];
-		if (!model->reverseFace) {
-			DrawTriangle(p1, p2, p3, GL_TRIANGLE_STRIP);
-		}
-		else {
-			DrawTriangle(p2, p1, p3, GL_TRIANGLE_STRIP);
-		}
+		vector<float> p1 = model->vertex[model->face[i][0]];
+		vector<float> p2 = model->vertex[model->face[i][1]];
+		vector<float> p3 = model->vertex[model->face[i][2]];
+		DrawTriangle(p1, p2, p3, GL_TRIANGLES);
 	}
 }
+
 //----------------------------------------------------------------------------
 float GetRandomRange(float min, float max) {
 	float range = (max - min) * ((float)rand() / RAND_MAX);
@@ -183,53 +196,72 @@ void ResetRender() {
 	glLoadIdentity();
 	glViewport(0, 0, windowWidth, windowHeight);
 	gluLookAt(0, 0, cameraDistance, 0, 0, 0, 0, 1, 0);
+	
 }
 
-void DrawSkybox(float size)
-{
-	// �O�o�bø�s skySphere �e�M������
+void DrawFullScreenQuad(GLuint textureID, float alpha = 1.0f) {
+	glMatrixMode(GL_PROJECTION);
 	glPushMatrix();
-	GLfloat mat[16];
-	glGetFloatv(GL_MODELVIEW_MATRIX, mat);
-	mat[12] = mat[13] = mat[14] = 0.0f; // camera��m����
-	glLoadMatrixf(mat);
-	glRotatef(90, 1, 0, 0);
-	glTranslatef(0, 10, 0);
-	// �e����k�u���y��
-	GLUquadric* quad = gluNewQuadric();
-	gluQuadricTexture(quad, GL_TRUE);
+	glLoadIdentity();
+	gluOrtho2D(0, windowWidth, 0, windowHeight);
+
+	glMatrixMode(GL_MODELVIEW);
+	glPushMatrix();
+	glLoadIdentity();
+
+	glDisable(GL_DEPTH_TEST);
 	glEnable(GL_TEXTURE_2D);
-	glBindTexture(GL_TEXTURE_2D, skyTextures[0]);
-	gluSphere(quad, 500.0f, 64, 64); // radius, slices, stacks
-	gluDeleteQuadric(quad);
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+	glBindTexture(GL_TEXTURE_2D, textureID);
+	glColor4f(1.0f, 1.0f, 1.0f, alpha);
+
+	glBegin(GL_QUADS);
+	glTexCoord2f(0, 1); glVertex2f(0, 0);
+	glTexCoord2f(1, 1); glVertex2f(windowWidth, 0);
+	glTexCoord2f(1, 0); glVertex2f(windowWidth, windowHeight);
+	glTexCoord2f(0, 0); glVertex2f(0, windowHeight);
+	glEnd();
+
+	glDisable(GL_BLEND);
 	glDisable(GL_TEXTURE_2D);
+	glEnable(GL_DEPTH_TEST);
 
 	glPopMatrix();
+	glMatrixMode(GL_PROJECTION);
+	glPopMatrix();
+	glMatrixMode(GL_MODELVIEW);
 }
 
-//----------------------------------------------------------------------------
+void DrawBackground() {
+	glDisable(GL_LIGHTING);
+	DrawFullScreenQuad(skyTextures[0], 1.0f - blendFactor); // 暗
+	DrawFullScreenQuad(skyTextures[1], blendFactor);        // 亮
+	glEnable(GL_LIGHTING);
+}
+
+//
 void RenderScene() {
 	ResetRender();
-
+	DrawBackground();
 	glPushMatrix();
 	glTranslatef(cameraPos[0], cameraPos[1], cameraPos[2]);
 	glRotatef(cameraRotate[0], 1, 0, 0);
 	glRotatef(cameraRotate[1], 0, 1, 0);
 	glRotatef(cameraRotate[2], 0, 0, 1);
-	DrawSkybox(500.0f);
+
+	// Draw Dot
+	for (int i = 0; i < DOT_NUMBER; i++) {
+		dotArray[i].DrawDot();
+	}
+	
+	// Draw UFO
+	for (int i = 0; i < UFO_NUMBER; i++) {
+		ufoArray[i].DrawSelf();
+	}
 
 	glColor3f(0.3f, 1.0f, 0.3f);
-	
-	//Draw ShipB
-	for (int i = 0; i < SHIPB_NUMBER; i++) {
-		shipBArray[i].DrawSelf();
-	}
-
-	//Draw Earth
-	for (int i = 0; i < EARTH_NUMBER; i++) {
-		earthArray[i].DrawSelf();
-	}
-
 	glPopMatrix();
 
 	glutSwapBuffers();
@@ -262,7 +294,7 @@ void SetupRC() {
 	gluPerspective(60, 1.6f, 1, 5000);
 	glShadeModel(GL_FLAT);
 }
-//----------------------------------------------------------------------------
+//
 void LoadTextureImage(string filePath, int index) {
 	cv::Mat image = cv::imread(filePath);
 	if (image.empty()) {
@@ -297,52 +329,88 @@ void LoadSkyTextureImage(string filePath, int index) {
 
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, image.cols, image.rows, 0, GL_BGR_EXT, GL_UNSIGNED_BYTE, image.ptr());
 }
-//----------------------------------------------------------------------------
+//
 void LoadAllTexture() {
 	glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
 	glGenTextures(TEXTURE_NUMBER, textures);
-	LoadTextureImage("./Textures/Camouflage.jpg", CAMOUFLAGE_TEX_INDEX);
-	LoadTextureImage("./Textures/metal.jpg", METAL_TEX_INDEX);
-	LoadTextureImage("./Textures/earth.jpeg", EARTH_TEX_INDEX);
+	LoadTextureImage("./Textures/blue.png", bluedotTextureIndex);
+	LoadTextureImage("./Textures/red.png", reddotTextureIndex);
+	LoadTextureImage("./Textures/green.png", greendotTextureIndex);
+	LoadTextureImage("./Textures/UFO.jpeg", UFOTextureIndex);
 
-	glGenTextures(SKY_TEXTURE_NUMBER, skyTextures);
-	LoadSkyTextureImage("./Textures/sky.png", SKY_TEX0);
+	LoadSkyTextureImage("./Textures/dark_forest.jpeg", 0);   // 漸層起點
+	LoadSkyTextureImage("./Textures/bright_forest.jpeg", 1); // 漸層終點
 }
-//----------------------------------------------------------------------------
+//
 void LoadObj() {
 	cout << "Start to Read OBJ Files..." << endl;
-	LoadObjFile("./Objs/ShipBodyB.obj", &shipBodyB);
-	shipBodyB.textureIndex = METAL_TEX_INDEX;
-	shipBodyB.reverseFace = true;
-	LoadObjFile("./Objs/SpecialA.obj", &specialA);
-	specialA.textureIndex = CAMOUFLAGE_TEX_INDEX;
-	LoadObjFile("./Objs/SpecialB.obj", &specialB);
-	specialB.textureIndex = CAMOUFLAGE_TEX_INDEX;
-	LoadObjFile("./Objs/EARTH.obj", &earth);
-	earth.textureIndex = EARTH_TEX_INDEX;
+	LoadObjFile("./Objs/dot.obj", &dotBlue);
+	LoadObjFile("./Objs/dot.obj", &dotRed);
+	LoadObjFile("./Objs/dot.obj", &dotGreen);
+	dotBlue.textureIndex = bluedotTextureIndex;
+	dotRed.textureIndex = reddotTextureIndex;
+	dotGreen.textureIndex = greendotTextureIndex;
+	LoadObjFile("./Objs/UFO.obj", &ufo);
+	ufo.textureIndex = UFOTextureIndex;
+
 }
-//----------------------------------------------------------------------------
+
 void InitModel() {
 
-	shipBArray[0].position[0] = -80; shipBArray[0].position[2] = -25;
-	shipBArray[0].rotateDegree = -45;
+	srand(time(0)); // 初始化亂數種子
 
-	earthArray[0].position[0] = -50; earthArray[0].position[2] = 10;
-	earthArray[0].rotateDegree = 0;
+	for (int i = 0; i < DOT_NUMBER; ++i) {
+		dotArray[i].position[0] = GetRandomRange(-200.0f, 200.0f);
+		dotArray[i].position[1] = GetRandomRange(-100.0f, 100.0f);
+		dotArray[i].position[2] = GetRandomRange(-20.0f, 20.0f);
+		dotArray[i].textureIndex = i % 3;
+
+		if (dotArray[i].textureIndex == 0)
+			dotArray[i].model = &dotBlue;
+		else if (dotArray[i].textureIndex == 1)
+			dotArray[i].model = &dotRed;
+		else
+			dotArray[i].model = &dotGreen;
+	}
+	ufoArray[0].position[0] = -200;  // X軸，地球旁邊
+	ufoArray[0].position[2] = 0;   // Z軸
+	ufoArray[0].position[1] = 20;  // Y軸，高度
+	ufoArray[0].rotateDegree = 0;
+
 }
-//----------------------------------------------------------------------------
-void AnimeLoop(int i) {
-	for (int i = 0; i < SHIPB_NUMBER; i++) {
-		shipBArray[i].Update();
-	}
 
-	for (int i = 0; i < EARTH_NUMBER; i++) {
-		earthArray[i].Update();
+int frameCount = 0;
+void AnimeLoop(int value) {
+
+	if (isPlaying) {
+		frameCount++;
+
+		const int blendStart = 0;
+		const int blendDuration = 300; // 約 10 秒
+
+		if (frameCount <= blendDuration) {
+			dotScale = 0.01f + frameCount * (0.6f / blendDuration); // 小到大
+			dotAlpha = frameCount / (float)blendDuration; // 透明到亮
+			blendFactor = frameCount / (float)blendDuration;
+		}
+		else {
+			dotScale = 0.61f;
+			dotAlpha = 1.0f;
+			blendFactor = 1.0f;
+		}
+		for (int i = 0; i < DOT_NUMBER; i++) {
+			dotArray[i].Update();
+		}
+		
+		for (int i = 0; i < UFO_NUMBER; i++) {
+			ufoArray[i].Update();
+		}
 	}
+	
 	glutPostRedisplay();
-	glutTimerFunc(30, AnimeLoop, 0);
+	glutTimerFunc(33, AnimeLoop, 0);
 }
-//----------------------------------------------------------------------------
+
 void SpecialKey(int key, int x, int y) {
 	if (key == GLUT_KEY_UP) {
 		cameraPos[2] += cameraMoveSpeed * 2.5f;
@@ -358,7 +426,7 @@ void SpecialKey(int key, int x, int y) {
 	}
 	glutPostRedisplay();
 }
-//--------------------------------------------------------------------------
+
 void KeyFunction(unsigned char key, int x, int y) {
 	if (key == '+') {
 		cameraPos[1] -= cameraMoveSpeed * 0.5f;
@@ -366,7 +434,7 @@ void KeyFunction(unsigned char key, int x, int y) {
 	if (key == '-') {
 		cameraPos[1] += cameraMoveSpeed * 0.5f;
 	}
-	if (key == 'a') {
+	if (key == 't') {
 		cameraRotate[1] -= cameraRotateSpeed;
 	}
 	if (key == 'd') {
@@ -377,6 +445,9 @@ void KeyFunction(unsigned char key, int x, int y) {
 	}
 	if (key == 's') {
 		cameraRotate[0] -= cameraRotateSpeed;
+	}
+	if (key == 'A' or key == 'a') {
+		isPlaying = !isPlaying;
 	}
 	glutPostRedisplay();
 }
@@ -402,7 +473,6 @@ int main(int argc, char* argv[]) {
 	AnimeLoop(0);
 	glutMainLoop();
 	glDeleteTextures(TEXTURE_NUMBER, textures);
-	glDeleteTextures(SKY_TEXTURE_NUMBER, skyTextures);
+	//glDeleteTextures(SKY_TEXTURE_NUMBER, skyTextures);
 	return 0;
 }
-//---------------------------------------------------------------------------
